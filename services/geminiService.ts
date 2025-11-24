@@ -11,15 +11,23 @@ const MODEL_NAME = 'gemini-2.5-flash';
 // Helper to ensure prompts are always unique to force the LLM to vary responses
 const getRandomifier = () => `RandomSeed:${Date.now()}-${Math.random().toString(36).substring(7)}`;
 
-export const generateLetterQuestion = async (level: number): Promise<LetterQuestion> => {
+// Helper to construct exclusion instruction
+const getExclusionInstruction = (excludeWords?: string[]) => {
+  if (!excludeWords || excludeWords.length === 0) return "";
+  return `IMPORTANT: Do NOT use the following words: ${excludeWords.join(', ')}. Pick different words.`;
+};
+
+export const generateLetterQuestion = async (level: number, excludeWords: string[] = []): Promise<LetterQuestion> => {
   let prompt = "";
   if (level === 1) prompt = "Generate a quiz for a child to identify a Hebrew word STARTING with a specific letter.";
   else if (level === 2) prompt = "Generate a quiz for a child to identify a Hebrew word ENDING with a specific letter.";
   else prompt = "Generate a quiz for a child to identify a Hebrew word CONTAINING a specific letter.";
 
+  const exclusion = getExclusionInstruction(excludeWords);
+
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `${prompt} Use CONCRETE NOUNS (animals, objects, food) that are easy to visualize. VARY the target letter and words significantly from previous requests. Do not always pick 'Aleph' or 'Bet'. ${getRandomifier()}`,
+    contents: `${prompt} ${exclusion} Use CONCRETE NOUNS (animals, objects, food) that are easy to visualize. VARY the target letter and words significantly from previous requests. Do not always pick 'Aleph' or 'Bet'. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -48,7 +56,7 @@ export const generateLetterQuestion = async (level: number): Promise<LetterQuest
   return JSON.parse(response.text || "{}") as LetterQuestion;
 };
 
-export const generateNikkudQuestion = async (level: number): Promise<NikkudQuestion> => {
+export const generateNikkudQuestion = async (level: number, excludeWords: string[] = []): Promise<NikkudQuestion> => {
   // Level mapping logic in prompt
   const levelsDesc = [
     "Simple: Patach, Kamatz, Hirik",
@@ -57,10 +65,11 @@ export const generateNikkudQuestion = async (level: number): Promise<NikkudQuest
     "Expert: Dagesh, Mapiq"
   ];
   const currentDesc = levelsDesc[Math.min(level - 1, 3)];
+  const exclusion = getExclusionInstruction(excludeWords);
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `Generate a 'Complete the Nikkud' question for Hebrew level: ${currentDesc}. Use a CONCRETE NOUN (animal, object) that is easy to visualize. Choose different words than usual. ${getRandomifier()}`,
+    contents: `Generate a 'Complete the Nikkud' question for Hebrew level: ${currentDesc}. ${exclusion} Use a CONCRETE NOUN (animal, object) that is easy to visualize. Choose different words than usual. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -81,14 +90,16 @@ export const generateNikkudQuestion = async (level: number): Promise<NikkudQuest
   return JSON.parse(response.text || "{}") as NikkudQuestion;
 };
 
-export const generateSentenceQuestion = async (level: number): Promise<SentenceQuestion> => {
+export const generateSentenceQuestion = async (level: number, excludeWords: string[] = []): Promise<SentenceQuestion> => {
   let complexity = "simple 3 word sentence, fully vocalized (Nikkud).";
   if (level === 2) complexity = "longer 5+ word sentence, fully vocalized.";
   if (level >= 3) complexity = "sentence with NO Nikkud.";
 
+  const exclusion = getExclusionInstruction(excludeWords);
+
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `Generate a Hebrew sentence completion question for a 6 year old. ${complexity} The context should be visual. Ensure the missing word is NOT in the sentence parts. ${getRandomifier()}`,
+    contents: `Generate a Hebrew sentence completion question for a 6 year old. ${complexity} ${exclusion} The context should be visual. Ensure the missing word is NOT in the sentence parts. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {

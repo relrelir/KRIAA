@@ -21,6 +21,7 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
   const [imagesLoadedCount, setImagesLoadedCount] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [imageSeeds, setImageSeeds] = useState<string[]>([]);
+  const [usedWords, setUsedWords] = useState<string[]>([]);
   
   // Ref to track if we've already handled the completion for a specific image index
   const loadedIndices = useRef<Set<number>>(new Set());
@@ -29,7 +30,9 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
   const isReady = !loadingData && data && imagesLoadedCount === data.options.length;
 
   useEffect(() => {
-    loadLevel();
+    // Reset used words when level changes to start fresh
+    setUsedWords([]);
+    loadLevel([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level]);
 
@@ -50,7 +53,7 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
     }
   }, [isReady, data]);
 
-  const loadLevel = async () => {
+  const loadLevel = async (currentUsedWords: string[] = usedWords) => {
     setLoadingData(true);
     setImagesLoadedCount(0);
     loadedIndices.current.clear();
@@ -58,10 +61,16 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
     setImageSeeds([]); // Reset seeds
     
     try {
-      const q = await generateLetterQuestion(level);
+      // Pass the blacklist to the service
+      const q = await generateLetterQuestion(level, currentUsedWords);
+      
+      // Update the used words list with the Correct Answer from the new question
+      const correctOption = q.options.find(o => o.isCorrect);
+      if (correctOption) {
+        setUsedWords(prev => [...prev, correctOption.word]);
+      }
       
       // Generate unique random seeds for this specific game session
-      // This ensures we get new images even if the text options happen to be similar
       const newSeeds = q.options.map(() => Math.random().toString(36).substring(7));
       setImageSeeds(newSeeds);
       
