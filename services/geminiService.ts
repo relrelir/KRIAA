@@ -8,6 +8,9 @@ import { LetterQuestion, NikkudQuestion, SentenceQuestion } from "../types";
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const MODEL_NAME = 'gemini-2.5-flash';
 
+// Helper to ensure prompts are always unique to force the LLM to vary responses
+const getRandomifier = () => `RandomSeed:${Date.now()}-${Math.random().toString(36).substring(7)}`;
+
 export const generateLetterQuestion = async (level: number): Promise<LetterQuestion> => {
   let prompt = "";
   if (level === 1) prompt = "Generate a quiz for a child to identify a Hebrew word STARTING with a specific letter.";
@@ -16,7 +19,7 @@ export const generateLetterQuestion = async (level: number): Promise<LetterQuest
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `${prompt} Use CONCRETE NOUNS (animals, objects, food) that are easy to visualize. Output valid JSON.`,
+    contents: `${prompt} Use CONCRETE NOUNS (animals, objects, food) that are easy to visualize. VARY the target letter and words significantly from previous requests. Do not always pick 'Aleph' or 'Bet'. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -57,7 +60,7 @@ export const generateNikkudQuestion = async (level: number): Promise<NikkudQuest
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `Generate a 'Complete the Nikkud' question for Hebrew level: ${currentDesc}. Use a CONCRETE NOUN (animal, object) that is easy to visualize.`,
+    contents: `Generate a 'Complete the Nikkud' question for Hebrew level: ${currentDesc}. Use a CONCRETE NOUN (animal, object) that is easy to visualize. Choose different words than usual. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {
@@ -85,7 +88,7 @@ export const generateSentenceQuestion = async (level: number): Promise<SentenceQ
 
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
-    contents: `Generate a Hebrew sentence completion question for a 6 year old. ${complexity} The context should be visual.`,
+    contents: `Generate a Hebrew sentence completion question for a 6 year old. ${complexity} The context should be visual. Ensure the missing word is NOT in the sentence parts. ${getRandomifier()}`,
     config: {
       responseMimeType: "application/json",
       responseSchema: {

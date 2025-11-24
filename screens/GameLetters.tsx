@@ -20,6 +20,7 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
   const [loadingData, setLoadingData] = useState(true);
   const [imagesLoadedCount, setImagesLoadedCount] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
+  const [imageSeeds, setImageSeeds] = useState<string[]>([]);
   
   // Ref to track if we've already handled the completion for a specific image index
   const loadedIndices = useRef<Set<number>>(new Set());
@@ -54,8 +55,16 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
     setImagesLoadedCount(0);
     loadedIndices.current.clear();
     setSelected(null);
+    setImageSeeds([]); // Reset seeds
+    
     try {
       const q = await generateLetterQuestion(level);
+      
+      // Generate unique random seeds for this specific game session
+      // This ensures we get new images even if the text options happen to be similar
+      const newSeeds = q.options.map(() => Math.random().toString(36).substring(7));
+      setImageSeeds(newSeeds);
+      
       setData(q);
     } catch (e) {
       console.error(e);
@@ -142,7 +151,7 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
               >
                 <div className="w-full aspect-square bg-gray-100 rounded-xl mb-3 overflow-hidden shadow-inner relative">
                   <img 
-                    src={getImageUrl(opt.imagePrompt, `${idx}${level}`)}
+                    src={getImageUrl(opt.imagePrompt, imageSeeds[idx] || 'default')}
                     alt={opt.word}
                     onLoad={() => handleImageLoad(idx)}
                     onError={() => handleImageLoad(idx)} // Treat error as loaded
