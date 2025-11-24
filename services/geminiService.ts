@@ -2,9 +2,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { LetterQuestion, NikkudQuestion, SentenceQuestion } from "../types";
 
-// Note: In a real app, we would cache these responses or use a backend.
-// Here we generate on the fly for the "Infinite" learning experience.
-
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 const MODEL_NAME = 'gemini-2.5-flash';
 
@@ -14,7 +11,8 @@ const getRandomifier = () => `RandomSeed:${Date.now()}-${Math.random().toString(
 // Helper to construct exclusion instruction
 const getExclusionInstruction = (excludeWords?: string[]) => {
   if (!excludeWords || excludeWords.length === 0) return "";
-  return `IMPORTANT: Do NOT use the following words as the correct answer: ${excludeWords.join(', ')}.`;
+  // We use a very strong instruction here
+  return `IMPORTANT: Do NOT use any of these words as the correct answer: ${excludeWords.join(', ')}. Find different words.`;
 };
 
 export const generateLetterQuestion = async (level: number, excludeWords: string[] = []): Promise<LetterQuestion> => {
@@ -57,7 +55,6 @@ export const generateLetterQuestion = async (level: number, excludeWords: string
 };
 
 export const generateNikkudQuestion = async (level: number, excludeWords: string[] = []): Promise<NikkudQuestion> => {
-  // Level mapping logic in prompt
   const levelsDesc = [
     "Simple: Patach, Kamatz, Hirik",
     "Medium: Hatafim",
