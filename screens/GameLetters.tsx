@@ -11,189 +11,198 @@ interface Props {
 }
 
 const QUESTIONS_PER_SESSION = 5;
-const BUFFER_TARGET = 3; // Keep 3 questions ready in advance
+const BUFFER_TARGET = 3; // Number of questions to keep ready in memory
 
-// Generate URL with a specific seed to ensure cache consistency
+// --- HELPER FUNCTIONS ---
+
 const getImageUrl = (prompt: string, seed: string) => {
+  // Low resolution for instant loading, specific seed for consistency
   return `https://image.pollinations.ai/prompt/cute%20colorful%203d%20render%20cartoon%20of%20${encodeURIComponent(prompt)}?width=100&height=100&nologo=true&seed=${seed}`;
 };
 
-// Helper to preload an image and wait for it
-const preloadImage = (src: string): Promise<void> => {
-  return new Promise((resolve) => {
+const preloadImagesForQuestion = async (q: LetterQuestion, seeds: string[]) => {
+  const promises = q.options.map((opt, i) => new Promise<void>((resolve) => {
     const img = new Image();
-    img.src = src;
+    img.src = getImageUrl(opt.imagePrompt, seeds[i]);
     img.onload = () => resolve();
-    img.onerror = () => resolve(); // Don't block queue on error
-  });
+    img.onerror = () => resolve(); // Don't block on error, just continue
+  }));
+  await Promise.all(promises);
 };
+
+// --- TYPES ---
 
 interface PreparedQuestion {
   data: LetterQuestion;
-  seeds: string[]; // Specific seeds used for this question instance
+  seeds: string[];
 }
 
 export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
-  // Game State
+  // UI State
   const [currentQ, setCurrentQ] = useState<PreparedQuestion | null>(null);
-  const [correctCount, setCorrectCount] = useState(0);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [error, setError] = useState(false);
-  const [sessionFinished, setSessionFinished] = useState(false);
-  
-  // Refs for State Management (avoiding closures issues in async loops)
-  const bufferRef = useRef<PreparedQuestion[]>([]);
-  const usedWordsRef = useRef<Set<string>>(new Set());
-  const isFetchingRef = useRef(false);
-  const mountedRef = useRef(true);
+  const [score, setScore] = useState(0); // Tracks correct answers (0 to 5)
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const [isError, setIsError] = useState(false);
+  const [isSessionComplete, setIsSessionComplete] = useState(false);
+
+  // Refs for Logic (Mutable, non-rendering)
+  const queue = useRef<PreparedQuestion[]>([]);
+  const usedWords = useRef<Set<string>>(new Set());
+  const isFetching = useRef(false);
+  const isMounted = useRef(false);
 
   // --- LIFECYCLE ---
+
   useEffect(() => {
-    mountedRef.current = true;
-    startSession();
-    return () => { 
-      mountedRef.current = false; 
-    };
+    isMounted.current = true;
+    startNewSession();
+    return () => { isMounted.current = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [level]);
 
-  // Audio effect for new questions
+  // Audio trigger when a new question appears
   useEffect(() => {
-    if (currentQ && !sessionFinished) {
-      setTimeout(() => speakHebrew(currentQ.data.questionText), 300);
+    if (currentQ && !isSessionComplete) {
+      // Small delay to allow render
+      const timer = setTimeout(() => {
+        if (isMounted.current) speakHebrew(currentQ.data.questionText);
+      }, 300);
+      return () => clearTimeout(timer);
     }
-  }, [currentQ, sessionFinished]);
+  }, [currentQ, isSessionComplete]);
 
-  const startSession = () => {
-    // Reset state
-    setCorrectCount(0);
-    setSessionFinished(false);
-    setSelected(null);
+  // --- LOGIC ---
+
+  const startNewSession = () => {
+    setScore(0);
+    setIsSessionComplete(false);
+    setSelectedIdx(null);
     setCurrentQ(null);
-    setError(false);
-    bufferRef.current = [];
-    usedWordsRef.current.clear();
-    isFetchingRef.current = false;
+    setIsError(false);
     
-    // Start filling buffer
+    // Reset Refs
+    queue.current = [];
+    usedWords.current.clear();
+    isFetching.current = false;
+
+    // Start the machine
     fillBuffer();
   };
 
-  // --- SMART BUFFER LOGIC ---
   const fillBuffer = async () => {
-    if (!mountedRef.current) return;
+    if (!isMounted.current) return;
+    if (isFetching.current) return;
+    if (queue.current.length >= BUFFER_TARGET) return;
 
-    // Stop if buffer is healthy OR we are already fetching OR session is effectively over
-    if (bufferRef.current.length >= BUFFER_TARGET || isFetchingRef.current) {
-      return;
-    }
-
-    isFetchingRef.current = true;
+    isFetching.current = true;
 
     try {
-      // 1. Generate Data with Exclusions
-      const excludedArray = Array.from(usedWordsRef.current) as string[];
-      const q = await generateLetterQuestion(level, excludedArray);
-      
-      if (!mountedRef.current) return;
+      // 1. Prepare exclusion list
+      const excludeList = Array.from(usedWords.current) as string[];
 
-      // 2. Speculative Exclusion: Add correct word to blacklist immediately
-      const correctWord = q.options.find(o => o.isCorrect)?.word;
-      if (correctWord) {
-        usedWordsRef.current.add(correctWord);
+      // 2. Fetch Data
+      const q = await generateLetterQuestion(level, excludeList);
+
+      if (!isMounted.current) return;
+
+      // 3. Speculatively add correct word to blacklist so next fetch doesn't repeat it
+      const correctOption = q.options.find(o => o.isCorrect);
+      if (correctOption) {
+        usedWords.current.add(correctOption.word);
       }
 
-      // 3. Image Preloading (The "Gate")
-      // Generate seeds now so they are locked for this question instance
+      // 4. Generate Seeds & Preload Images
+      // This step blocks until images are actually in browser cache
       const seeds = q.options.map(() => Math.random().toString(36).substring(7));
-      
-      const imagePromises = q.options.map((opt, i) => 
-        preloadImage(getImageUrl(opt.imagePrompt, seeds[i]))
-      );
+      await preloadImagesForQuestion(q, seeds);
 
-      // Block until images are ready
-      await Promise.all(imagePromises);
+      if (!isMounted.current) return;
 
-      // 4. Push to Queue
+      // 5. Add to Queue
       const prepared: PreparedQuestion = { data: q, seeds };
-      bufferRef.current.push(prepared);
+      queue.current.push(prepared);
 
-      // 5. Update UI if we were waiting for the first question
-      setCurrentQ(prev => {
+      // 6. If UI is waiting for a question, serve it immediately
+      setCurrentQ((prev) => {
         if (!prev) {
-          return bufferRef.current.shift() || null;
+          return queue.current.shift() || null;
         }
         return prev;
       });
 
-    } catch (e) {
-      console.error("Buffer error:", e);
-      if (bufferRef.current.length === 0 && !currentQ) {
-        setError(true);
+    } catch (err) {
+      console.error("Error generating question:", err);
+      if (!currentQ && queue.current.length === 0) {
+        setIsError(true);
       }
     } finally {
-      isFetchingRef.current = false;
-      // Recursively keep filling if we haven't reached target
-      if (mountedRef.current && bufferRef.current.length < BUFFER_TARGET) {
-         fillBuffer();
+      isFetching.current = false;
+      // Recursively fill if we still need more
+      if (isMounted.current && queue.current.length < BUFFER_TARGET && !isSessionComplete) {
+        fillBuffer();
       }
     }
   };
 
-  const handleNextQuestion = () => {
-    // Check if session complete
-    if (correctCount + 1 >= QUESTIONS_PER_SESSION) {
-      setSessionFinished(true);
-      onComplete(true);
-      return;
-    }
+  const handleOptionClick = (index: number) => {
+    if (!currentQ || selectedIdx !== null) return; // Block double clicks
 
-    setCorrectCount(prev => prev + 1);
-    setSelected(null);
-
-    // Instant Transition: Pop from buffer
-    const next = bufferRef.current.shift();
-    if (next) {
-      setCurrentQ(next);
-      // Trigger background refill
-      fillBuffer();
-    } else {
-      // Buffer dry (rare) -> show loader
-      setCurrentQ(null);
-      fillBuffer();
-    }
-  };
-
-  const handleSelect = (index: number) => {
-    if (!currentQ || selected !== null) return;
-    
-    setSelected(index);
+    setSelectedIdx(index);
     const option = currentQ.data.options[index];
     speakHebrew(option.word);
 
     if (option.isCorrect) {
+      // --- CORRECT ANSWER ---
       playSound('correct');
-      
-      // Fast transition: 700ms delay for feedback, then swap
+
       setTimeout(() => {
-        handleNextQuestion();
-      }, 700);
+        if (!isMounted.current) return;
+
+        // Check Win Condition
+        if (score + 1 >= QUESTIONS_PER_SESSION) {
+          setIsSessionComplete(true);
+          onComplete(true);
+        } else {
+          // Continue Game
+          setScore(prev => prev + 1);
+          setSelectedIdx(null);
+          
+          // Pop next question from queue instantly
+          const nextQ = queue.current.shift();
+          if (nextQ) {
+            setCurrentQ(nextQ);
+            // Trigger refill in background
+            fillBuffer();
+          } else {
+            // Buffer dry (rare) - set null to show loader while we fetch
+            setCurrentQ(null);
+            fillBuffer();
+          }
+        }
+      }, 700); // 700ms delay for visual feedback
+
     } else {
+      // --- WRONG ANSWER ---
       playSound('wrong');
       setTimeout(() => {
-        speakHebrew("נסה שוב");
-        setSelected(null);
+        if (isMounted.current) {
+          speakHebrew("נסה שוב");
+          setSelectedIdx(null); // Allow retrying
+        }
       }, 1000);
     }
   };
 
   // --- RENDER ---
 
-  if (error) {
+  if (isError) {
     return (
       <div className="flex flex-col items-center justify-center h-full">
-        <p className="text-xl text-gray-600 mb-4">אופס, בעיה בתקשורת</p>
-        <button onClick={startSession} className="bg-brand-blue text-white px-6 py-3 rounded-xl flex items-center gap-2">
+        <p className="text-xl text-gray-600 mb-4">אופס, היתה בעיה בטעינה</p>
+        <button 
+          onClick={startNewSession} 
+          className="bg-brand-blue text-white px-6 py-3 rounded-xl flex items-center gap-2 shadow-lg active:scale-95 transition-transform"
+        >
           <RefreshCw className="w-5 h-5" />
           נסה שוב
         </button>
@@ -201,69 +210,78 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
     );
   }
 
-  // Initial Loader
+  // Initial Loading State
   if (!currentQ) {
     return (
       <div className="absolute inset-0 z-50 flex flex-col items-center justify-center bg-sky-50">
         <Loader2 className="w-12 h-12 animate-spin text-brand-blue" />
         <p className="mt-4 text-xl font-bold text-gray-500">
-           {bufferRef.current.length > 0 ? 'כמעט מוכן...' : 'מכין משחקים...'}
+           {queue.current.length > 0 ? 'כמעט מוכן...' : 'מכין שאלות...'}
         </p>
       </div>
     );
   }
 
+  // Game UI
   return (
-    <div className="flex flex-col h-full p-4 items-center w-full">
+    <div className="flex flex-col h-full p-4 items-center w-full max-w-md mx-auto">
       
-      {/* Session Progress Bar */}
-      <div className="w-full max-w-md flex gap-2 mb-4">
+      {/* Progress Bar */}
+      <div className="w-full flex gap-2 mb-6">
         {Array.from({ length: QUESTIONS_PER_SESSION }).map((_, i) => (
           <div 
             key={i} 
-            className={`h-2 flex-1 rounded-full transition-colors duration-300 ${i < correctCount ? 'bg-green-500' : 'bg-gray-200'}`}
+            className={`h-3 flex-1 rounded-full transition-all duration-500 shadow-sm
+              ${i < score ? 'bg-green-500 scale-100' : 'bg-gray-200 scale-95'}
+            `}
           />
         ))}
       </div>
 
-      {/* Question Header */}
-      <div className="bg-white p-6 rounded-3xl shadow-lg border-b-4 border-gray-200 w-full max-w-md text-center mb-6 relative animate-in slide-in-from-top-4 duration-300">
+      {/* Question Card */}
+      <div className="w-full bg-white p-6 rounded-3xl shadow-lg border-b-4 border-gray-200 text-center mb-6 relative animate-in zoom-in-95 duration-300">
         <button 
           onClick={() => speakHebrew(currentQ.data.questionText)}
-          className="absolute top-2 right-2 p-2 bg-gray-100 rounded-full hover:bg-gray-200"
+          className="absolute top-3 right-3 p-2 bg-gray-50 rounded-full hover:bg-gray-100 text-gray-400 hover:text-brand-blue transition-colors"
         >
           🔊
         </button>
-        <h2 className="text-2xl font-bold text-gray-700 mb-2">{currentQ.data.questionText}</h2>
-        <div className="inline-block bg-brand-yellow/30 px-6 py-2 rounded-xl border-2 border-brand-yellow">
-          <span className="text-6xl font-bold text-gray-800">{currentQ.data.targetLetter}</span>
+        <h2 className="text-2xl font-bold text-gray-700 mb-4">{currentQ.data.questionText}</h2>
+        <div className="inline-block bg-yellow-50 px-8 py-4 rounded-2xl border-2 border-brand-yellow/50 shadow-sm">
+          <span className="text-7xl font-bold text-brand-blue drop-shadow-sm">{currentQ.data.targetLetter}</span>
         </div>
       </div>
 
-      {/* Grid of Choices */}
-      <div className="grid grid-cols-2 gap-4 w-full max-w-md pb-4 flex-1">
-        {currentQ.data.options.map((opt, idx) => (
-          <button
-            key={`${currentQ.data.targetLetter}-${idx}`}
-            onClick={() => handleSelect(idx)}
-            className={`
-              relative flex flex-col items-center justify-center p-2 rounded-2xl border-4 transition-all duration-200
-              ${selected === idx 
-                ? (opt.isCorrect ? 'bg-green-100 border-green-500 scale-105' : 'bg-red-100 border-red-500') 
-                : 'bg-white border-brand-blue/30 hover:bg-brand-blue/10 active:scale-[0.98]'
-              }
-            `}
-          >
-            <div className="w-full aspect-square bg-gray-100 rounded-xl mb-2 overflow-hidden shadow-inner">
-              <img 
-                src={getImageUrl(opt.imagePrompt, currentQ.seeds[idx])}
-                alt={opt.word}
-                className="w-full h-full object-cover"
-              />
-            </div>
-            <span className="text-xl sm:text-2xl font-bold text-gray-700">{opt.word}</span>
-          </button>
-        ))}
+      {/* Answers Grid */}
+      <div className="grid grid-cols-2 gap-4 w-full flex-1 min-h-0">
+        {currentQ.data.options.map((opt, idx) => {
+          const isSelected = selectedIdx === idx;
+          const statusColor = isSelected 
+            ? (opt.isCorrect ? 'bg-green-100 border-green-500 ring-4 ring-green-200' : 'bg-red-100 border-red-500 ring-4 ring-red-200')
+            : 'bg-white border-brand-blue/20 hover:border-brand-blue hover:shadow-md';
+
+          return (
+            <button
+              key={`${currentQ.data.targetLetter}-${idx}`}
+              onClick={() => handleOptionClick(idx)}
+              className={`
+                relative flex flex-col items-center justify-center p-3 rounded-2xl border-2 transition-all duration-200
+                ${statusColor}
+                active:scale-[0.98]
+              `}
+            >
+              <div className="w-full aspect-square bg-gray-50 rounded-xl mb-3 overflow-hidden shadow-inner">
+                {/* Image is guaranteed to be loaded from cache */}
+                <img 
+                  src={getImageUrl(opt.imagePrompt, currentQ.seeds[idx])}
+                  alt={opt.word}
+                  className="w-full h-full object-cover"
+                />
+              </div>
+              <span className="text-xl sm:text-2xl font-bold text-gray-700">{opt.word}</span>
+            </button>
+          );
+        })}
       </div>
     </div>
   );
