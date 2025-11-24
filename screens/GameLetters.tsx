@@ -21,6 +21,8 @@ export const GameLetters: React.FC<Props> = ({ level, onComplete }) => {
   const [imagesLoadedCount, setImagesLoadedCount] = useState(0);
   const [selected, setSelected] = useState<number | null>(null);
   const [imageSeeds, setImageSeeds] = useState<string[]>([]);
+  
+  // State to track used words to prevent repetition
   const [usedWords, setUsedWords] = useState<string[]>([]);
   
   // Ref to track if we've already handled the completion for a specific image index
