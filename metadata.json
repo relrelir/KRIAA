@@ -1,0 +1,7 @@
+{
+  "name": "Aleph-Bet City: Learn Hebrew",
+  "description": "A gamified, structured Hebrew learning adventure for children aged 5-7. Features letter recognition, Nikkud mastery, and sentence building within an interactive city map.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
