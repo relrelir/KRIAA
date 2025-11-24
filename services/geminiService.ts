@@ -11,8 +11,7 @@ const getRandomifier = () => `RandomSeed:${Date.now()}-${Math.random().toString(
 // Helper to construct exclusion instruction
 const getExclusionInstruction = (excludeWords?: string[]) => {
   if (!excludeWords || excludeWords.length === 0) return "";
-  // We use a very strong instruction here
-  return `CRITICAL INSTRUCTION: Do NOT use any of these words as the correct answer or options: ${excludeWords.join(', ')}. You MUST choose different words.`;
+  return `IMPORTANT: Do NOT use the following words as the correct answer: ${excludeWords.join(', ')}.`;
 };
 
 export const generateLetterQuestion = async (level: number, excludeWords: string[] = []): Promise<LetterQuestion> => {
